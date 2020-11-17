@@ -1,0 +1,846 @@
+---
+title: "ca_map"
+output: html_document
+
+#references: https://rdrr.io/cran/tigris/man/counties.html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown is for the purposes of generating a map of CA.
+```{r echo=FALSE}
+# Libraries
+library(tidyverse)
+library(tidycensus)
+library(leaflet)
+library(leaflet.extras)
+library(urbnmapr)
+library(dplyr)
+library(sf)
+library(maps)
+library(tigris)
+library(ggplot2)
+library(lubridate)
+library(RColorBrewer)
+library(ussf)
+
+# PARAMETERS
+
+# Read in Files and Data
+
+file_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/ca-data.rds") 
+amz_wmt_zip_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/amz_wmt_zip.rds") 
+amz_wmt_reach_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/amz_wmt_reach.rds") 
+ruccodes <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data-raw/ruralurbancodes2013-3.csv")
+
+#Colors
+
+COLOR_LOW = "darkorchid1"
+COLOR_HIGH = "darkorchid4"
+```
+
+# Read in Data
+
+```{r}
+ca_data <- 
+  read_rds(file_in) %>%
+  mutate(fips = as.integer(fips))
+amz_wmt_zip <- read_rds(amz_wmt_zip_in)
+amz_wmt_reach <- read_rds(amz_wmt_reach_in)
+ruc_codes <- read_csv(ruccodes)
+
+```
+
+# Read in Geometry Shape File
+
+```{r}
+ca_counties <- 
+  ussf::boundaries(
+    geography = "county",
+    resolution = "5m", 
+    projection = "longlat"
+  ) %>%
+  filter(as.integer(STATEFP) == 06) %>%
+  mutate(fips = as.integer(GEOID))
+  
+```
+
+## Create Column for Number of Cases, by Month
+
+```{r}
+df <- 
+  ca_data %>% 
+  select(date, fips, cases, deaths) %>%
+  mutate(cases = as.integer(cases)) %>%
+  mutate(
+    date = as.Date(date), 
+    month = month(date)
+  ) %>%
+  group_by(fips, month) %>%
+  summarise(total = sum(cases))
+
+```
+
+# Work with Bill
+#Imp. note to create a floor on the date, so that there aren't duplicate years
+```{r}
+# ca_cases <-
+#   ca_counties %>%
+#   left_join(
+#     ca_data %>%
+#       mutate(month = lubridate::floor_date(date, unit = "month")) %>%
+#       group_by(fips, month) %>% 
+#       summarize(total = sum(cases)) %>%
+#       ungroup() %>%
+#       left_join(ca_pop, by = "fips") %>%
+#       mutate(cases_per_capita = total / pop),
+#     by = "fips"
+#   )
+# 
+# ca_walmart <-
+#   amz_wmt_zip$wmt_zip %>%
+#   st_as_sf() %>%
+#   st_transform(crs = st_crs(4326))
+# 
+# ca_amazon <-
+#   amz_wmt_zip$amz_zip %>%
+#   st_transform(crs = 4326)
+```
+
+
+##ggplot with Bill
+```{r}
+
+# ggplot() +
+#   #geom_sf(aes(fill = cases_per_capita), data = ca_cases) +
+#  # geom_sf(aes(fill = area), data = st_as_sf(amz_wmt_zip$wmt_zip)) 
+#   geom_sf(data = amz_wmt_zip$wmt, color = "red")
+
+```
+
+
+# Create Fips Variable for ca_counties
+
+```{r}
+
+ca_counties <-
+  ca_counties %>%
+  mutate(fips = as.integer(GEOID))
+
+```
+
+# Join Data Sets
+
+```{r}
+
+df <-
+  df %>%
+  left_join(ca_counties, by = "fips")
+
+```
+
+
+## Get County Data from Census Data 
+
+```{r}
+
+census_ca <-
+  load_variables(year = 2018, dataset ="acs5")
+
+vars_acs5 <-
+  c(
+    total_pop = "B01003_001",
+    total_SNAP = "B19058_002",
+    total_white = "B02001_002",
+    total_black = "B02001_003",
+    total_nativeAlaska_AmInd = "B02001_004",
+    total_asian = "B02001_005",
+    total_Haw_PacIs = "B02001_006",
+    total_other = "B02001_007",
+    total_twoMore = "B02001_008",
+    has_comp = "B28003_002",
+    has_comp_dialUp = "B28003_003",
+    has_comp_broadband = "B28003_004",
+    has_comp_noInternet = "B28003_005",
+    no_comp = "B28003_006",
+    workTransVehicle = "B08301_001",
+    workTransPublicTrans = "B08301_010",
+    workTrans_bike = "B08301_018",
+    workTrans_walk = "B08301_019",
+    workTrans_other = "B08301_020",
+    workTrans_workHome = "B08301_021"
+  )
+
+df_acs5 <-
+  get_acs(
+    geography = "county",
+    variables = vars_acs5,
+    year = 2018,
+    state = 06
+  )
+
+# ##added with Bill 
+# ca_pop <-
+#   get_acs(
+#     geography = "county",
+#     variables = "B01003_001",
+#     year = 2018,
+#     state = 06
+#   ) %>%
+#   transmute(
+#     fips = as.integer(GEOID),
+#     pop = estimate
+#   )
+
+
+```
+
+## Join Census Data to COVID data, using FIPS
+
+```{r}
+
+# Create FIPS variable in ACS data frame
+
+df_acs5 <-
+  df_acs5 %>%
+    mutate(
+      fips = as.integer(GEOID)
+    )
+
+# Left join data COVID data set and create new variables per population count
+
+df_allVar <-
+  df %>%
+  left_join(df_acs5, by = "fips") %>%
+  select(-moe) %>%
+  #ungroup() %>% 
+  pivot_wider(
+    names_from = variable,
+    values_from = estimate
+  ) %>%
+  mutate(
+    cases_perPop = (total / total_pop),
+    percentWhite = (total_white / total_pop),
+    percentBlack = (total_black / total_pop),
+    percentNative = (total_nativeAlaska_AmInd / total_pop),
+    percentAsian = (total_asian / total_pop),
+    percentHaw_PacI = (total_Haw_PacIs / total_pop),
+    percentOther = (total_other / total_pop),
+    percentTwoMore = (total_twoMore / total_pop),
+    percent_trans_vehicle = (workTrans_vehicle / total_pop),
+    percentTransPublic = (workTrans_publicTrans /total_pop),
+    percentTransBike = (workTrans_bike / total_pop),
+    percentTransWalk = (workTrans_walk / total_pop),
+    percentTransOther = (workTrans_other / total_pop),
+    percentTransHome = (workTrans_workHome / total_pop),
+    percentSnap = (total_SNAP / total_pop),
+    percentComp = (has_comp / total_pop),
+    percentDialUp = (has_comp_dialUp / total_pop),
+    percentBroadband = (has_comp_broadband /total_pop),
+    percentNoInternet = (has_comp_noInternet /total_pop),
+    percentNoComp = (no_comp / total_pop)
+  )
+ 
+
+```
+
+
+# Read RUC Code Data as numberics
+
+```{r}
+ruc_codes 
+  ruc_codes$FIPS <- as.numeric(ruc_codes$FIPS)
+  ruc_codes$RUCC_2013 <- as.numeric(ruc_codes$RUCC_2013)
+ 
+
+```
+
+
+# Join RUC Code Data --NEED TO FIX
+```{r}
+ruc_codes_new <- 
+ruc_codes %>%
+  rename(
+    fips = FIPS
+  )
+
+df_allVar2 <-
+  df_allVar %>%
+    left_join(ruc_codes_new, by = "fips")
+
+```
+
+
+## Create Plot of CA
+## Used this site as reference: https://rdrr.io/cran/tigris/man/counties.html
+
+```{r}
+ca <- counties("California", cb = TRUE)
+
+gg <- ggplot()
+gg <- gg + geom_sf(data = ca, color="black", fill="white", size=0.25)
+
+gg
+```
+
+
+## Create HeatMap of CA with Total Number of COVID Cases for the Month of July 2020
+
+```{r}
+
+df %>% 
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = total), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Total COVID CA Cases Per Month, July 2020",
+    caption = "Source: New York Times Coronavirus Cases US"
+  )
+
+# df %>%
+#   filter(month==7) %>%
+#   View()
+
+```
+
+## Create Heat Map of CA with Cases Count per Population for July 2020
+
+```{r}
+
+ df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "CA COVID Cases, Percent of Population, July 2020",
+    caption = "Source: New York Times Coronavirus Cases US"
+  )
+
+
+
+```
+
+```{r}
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "CA COVID Cases, Percent of Population, July 2020",
+    caption = "Source: New York Times Coronavirus Cases US"
+  )
+
+```
+
+
+
+## Map with Sam Overlap
+
+```{r}
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "CA COVID Cases, Percent of Population, July 2020",
+    caption = "Source: New York Times Coronavirus Cases US"
+  )
+
+
+
+```
+
+
+
+## Create Heat Maps of CA for Transportation
+```{r}
+
+# Map for Vehicle as Main Transportation Form
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percent_trans_vehicle), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Transportion to Work, Vehicle",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+# Map for Public Transport as Main Transportation Form
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = workTrans_publicTrans), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Transportion to Work, Public Transit",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+```
+
+## Map for SNAP Usage
+
+```{r}
+
+# Map for SNAP Usage
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentSnap), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population on SNAP",
+    caption = "Source: ACS 2018 Census Data"
+  )
+```
+
+## Map of Computer Usage & Internet Access
+
+```{r}
+
+# Map for Computer Access
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentComp), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population With Computer Access",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+# Map for Dial Up
+
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentDialUp), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population With Dial Up",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+
+# Map for Broadband
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentBroadband), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population With Broadband",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+```
+
+
+## Map of No Internet / No Computer Access
+
+```{r}
+
+# Map for No Internet
+
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentNoInternet), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population Without Internet",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+# Map for No Computer
+
+df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = percentNoComp), color = "grey25", size = 0.1) +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population Without Computer",
+    caption = "Source: ACS 2018 Census Data"
+  )
+
+
+
+
+```
+
+## Layer in Sam's Mapping of Coverage by Amazon & Walmart
+
+```{r}
+
+# df_1 <- amz_wmt_zip$amz_zip
+# df_1 %>% 
+#   leaflet() %>%
+#   addProviderTiles(providers$CartoDB.Positron) %>%
+#   addPolygons() %>%
+#   addPolygons(
+#     data= df_allVar2 %>% st_as_sf,
+#     fillColor = ~total
+#   )
+
+  
+
+ df_allVar %>%
+  st_as_sf() %>%  
+  filter(month == 7) %>% 
+  ggplot() +
+  geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
+  geom_sf(aes(fill = amz_wmt_zip$amz_zip), color = "grey25", size = 0.1) +
+  geom_sf(aes(fill = amz_wmt_zip$wmt), color = "grey25", size = 0.1) +
+  geom_sf(aes(fill = amz_wmt_zip$wmt_zip), color = "grey25", size = 0.1) +
+  
+  
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "XX July 2020",
+    caption = "Source: XXX"
+  )
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+## NOTES & REFERNCE: Example code from Nico
+```{r}
+# ggplot() +
+#   geom_sf(aes(fill = ca_data$cases), data = ca, colour = "white")
+# 
+# counties %>% 
+#   left_join(election_2012_2016, by = c("NAME" = "county_name")) %>%
+#   ggplot() +
+#   geom_sf(aes(fill = r_d_change), size = 0.01) +
+#   geom_sf(data = counties, color = "grey25", fill = NA, size = 0.2) +
+#   scale_fill_gradient2(
+#     #low = COLOR_LOW,
+#    # high = COLOR_HIGH,
+#     na.value = "grey"
+#   ) +
+#   guides(
+#     fill =
+#       guide_colorbar(
+#         barheight = 0.5,
+#         barwidth = 15,
+#         title = NULL
+#       )
+#   ) +
+#   theme_void() +
+#   theme(
+#     legend.direction = "horizontal",
+#     legend.position = c(0.5, 0.95),
+#     plot.title = element_text(hjust = 0.5),
+#     plot.subtitle = element_text(hjust = 0.5)
+#   ) +
+#   labs(
+#     title = "TITLE HERE",
+#     caption = "Source: New York Times Coronavirus Cases US"
+#   )
+
+```
+
