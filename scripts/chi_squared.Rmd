@@ -1,0 +1,167 @@
+---
+title: "chi-squared"
+author: "Isabelle Foster, Sam Liu"
+date: "2/6/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+# Libraries
+library(tidyverse)
+library(tidycensus)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(lubridate)
+library(tableone)
+
+# Parameters
+
+file_raw <- here::here("/data-raw/us-counties.csv")
+
+entire_data <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/entire_data.rds") 
+
+file_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/ca-data.rds") 
+
+##This is using the updated snap_reach file from Sam, updated for 2019
+
+amz_wmt_reach_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/snap_reach.rds") 
+
+ruccodes <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data-raw/ruralurbancodes2013-3.csv")
+
+# Create list of Variables to be used in data analysis 
+
+myVars <- c("RUCC_2013", 'total_white', 'total_black', 'total_nativeAlaska_AmInd', 'total_asian', 'total_Haw_PacIs', 'total_other', 'total_twoMore', 'total_latino', 'workTransVehicle', 'workTransPublicTrans', 'workTrans_bike', 'workTrans_walk', 'no_internet', 'total_SNAP', '% Reached', 'has_comp', 'has_comp_dialUp', 'has_comp_broadband', 'has_comp_noInternet', 'no_comp', 'cases_perPop', 'stratified_reach', 'stratified_cases')
+
+# List of Categorical Vars
+
+factorVars <- c("RUCC_2013", "stratified_reach", "stratified_cases")
+
+
+```
+
+
+# Read in Datasets
+
+```{r cars}
+
+data_set <- 
+  read_rds(entire_data)
+
+amz_wmt_reach <-
+  read_rds(amz_wmt_reach_in)
+
+```
+
+
+# Clean Dataset
+
+```{r}
+
+# cleaning data
+all_data <- 
+  data_set %>% 
+  filter(month == 7) %>%
+  as.data.frame() %>% 
+  left_join(amz_wmt_reach, by = c("NAME.x" = "NAME")) %>% 
+  mutate(
+    total_white = total_white / total_pop, 
+    total_black = total_black / total_pop, 
+    total_nativeAlaska_AmInd = total_nativeAlaska_AmInd / total_pop, 
+    total_asian = total_asian / total_pop, 
+    total_Haw_PacIs = total_Haw_PacIs / total_pop, 
+    total_other = total_other / total_pop, 
+    total_twoMore = total_twoMore / total_pop, 
+    total_latino = total_latino / total_pop,
+    total_work = workTransVehicle + workTransPublicTrans + workTrans_bike + workTrans_walk,
+    workTransVehicle = workTransVehicle / total_work, 
+    workTransPublicTrans = workTransPublicTrans / total_work, 
+    workTrans_bike = workTrans_bike / total_work, 
+    workTrans_walk = workTrans_walk / total_work, 
+    no_internet = no_internet / total_HH, 
+    total_SNAP = total_SNAP / total_HH, 
+    has_comp = has_comp / total_pop, 
+    has_comp_dialUp = has_comp_dialUp / total_HH, 
+    has_comp_broadband = has_comp_broadband / total_HH, 
+    has_comp_noInternet = has_comp_noInternet / total_HH, 
+    no_comp = no_comp / total_HH, 
+    stratified_reach = 
+      case_when(
+        `% Reached` <= 50 ~ 1,
+        #(`% Reached` <= 50) & (`% Reached` > 25) ~ 2,
+        #(`% Reached` <= 75) & (`% Reached` > 50) ~ 3,
+        TRUE ~ 4,
+      ),
+      # stratified_cases = 
+      # case_when(
+      #   `cases_perPop` <= 0.196 ~ 1,
+      #   # (`% Reached` <= 50) & (`% Reached` > 25) ~ 2,
+      #   # (`% Reached` <= 75) & (`% Reached` > 50) ~ 3,
+      #   TRUE ~ 4,
+      # )
+    stratified_cases = 
+      case_when(
+        `cases_perPop` <= 0.0636578381 ~ 1,
+        (`cases_perPop` <= 0.1474656794) & (`cases_perPop` > 0.0636578381) ~ 2,
+        (`cases_perPop` <= 0.2608221747) & (`cases_perPop`> 0.1474656794) ~ 3,
+        TRUE ~ 4,
+      )
+  ) %>% 
+
+  select(all_of(myVars), "NAME.x")
+
+
+
+```
+
+## Chi Squared Analyis with Table One Package
+
+Using the Tableone Package
+
+```{r}
+
+# Identifying Quartiles for Cases Per Pop to be able to create the four categorial vars (based on quartiles)
+
+quantile(all_data$cases_perPop)
+
+# If we want to break Cases Per Pop into 3 Variables
+# quantile(all_data$cases_perPop, probs = seq(0, 1, 0.33))
+
+
+# table1 <- CreateTableOne(vars = myVars, data = all_data, factorVars = factorVars)
+# 
+# print(table1, showAllLevels = TRUE, formatOptions = list(big.mark = ","))
+
+```
+
+
+```{r pressure}
+
+
+table <- CreateTableOne(vars = myVars, strata = "stratified_reach", data = all_data, factorVars = factorVars)
+
+
+print(table, showAllLevels = TRUE, formatOptions = list(big.mark = ","))
+
+```
+# Test with Chi-Squared
+
+```{r}
+
+# test <- chisq.test(table(all_data$`Total Reached`, all_data$total_latino))
+# test
+
+
+# test2 <- fisher.test(all_data)
+# 
+# test2
+
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
