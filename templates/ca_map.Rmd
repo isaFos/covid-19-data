@@ -1,6 +1,7 @@
 ---
 title: "ca_map"
-output: html_document
+author: Isbaelle Foster
+output: Maps & Analysis
 
 #references: https://rdrr.io/cran/tigris/man/counties.html
 ---
@@ -18,7 +19,6 @@ library(tidyverse)
 library(tidycensus)
 library(leaflet)
 library(leaflet.extras)
-library(urbnmapr)
 library(dplyr)
 library(sf)
 library(maps)
@@ -27,6 +27,7 @@ library(ggplot2)
 library(lubridate)
 library(RColorBrewer)
 library(ussf)
+library(viridis)
 
 # PARAMETERS
 
@@ -34,7 +35,10 @@ library(ussf)
 
 file_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/ca-data.rds") 
 amz_wmt_zip_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/amz_wmt_zip.rds") 
-amz_wmt_reach_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/amz_wmt_reach.rds") 
+
+##This is using the updated snap_reach file from Sam, updated for 2019
+amz_wmt_reach_in <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/snap_reach.rds") 
+
 ruccodes <- ("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data-raw/ruralurbancodes2013-3.csv")
 
 #Colors
@@ -52,6 +56,7 @@ ca_data <-
 amz_wmt_zip <- read_rds(amz_wmt_zip_in)
 amz_wmt_reach <- read_rds(amz_wmt_reach_in)
 ruc_codes <- read_csv(ruccodes)
+ca_zip <- read_rds("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/ca_zip.rds")
 
 ```
 
@@ -149,12 +154,13 @@ df <-
 ```{r}
 
 census_ca <-
-  load_variables(year = 2018, dataset ="acs5")
+  load_variables(year = 2019, dataset = "acs5")
 
 vars_acs5 <-
   c(
     total_pop = "B01003_001",
-    total_SNAP = "B19058_002",
+    total_HH = "B19058_001",
+    total_SNAP = "B19058_002", 
     total_white = "B02001_002",
     total_black = "B02001_003",
     total_nativeAlaska_AmInd = "B02001_004",
@@ -162,12 +168,14 @@ vars_acs5 <-
     total_Haw_PacIs = "B02001_006",
     total_other = "B02001_007",
     total_twoMore = "B02001_008",
+    total_latino = "B03001_003",
     has_comp = "B28003_002",
     has_comp_dialUp = "B28003_003",
     has_comp_broadband = "B28003_004",
     has_comp_noInternet = "B28003_005",
+    no_internet = "B28002_013",
     no_comp = "B28003_006",
-    workTransVehicle = "B08301_001",
+    workTransVehicle = "B08301_002",
     workTransPublicTrans = "B08301_010",
     workTrans_bike = "B08301_018",
     workTrans_walk = "B08301_019",
@@ -179,7 +187,7 @@ df_acs5 <-
   get_acs(
     geography = "county",
     variables = vars_acs5,
-    year = 2018,
+    year = 2019,
     state = 06
   )
 
@@ -231,20 +239,31 @@ df_allVar <-
     percentHaw_PacI = (total_Haw_PacIs / total_pop),
     percentOther = (total_other / total_pop),
     percentTwoMore = (total_twoMore / total_pop),
-    percent_trans_vehicle = (workTrans_vehicle / total_pop),
-    percentTransPublic = (workTrans_publicTrans /total_pop),
+    percent_Latino = (total_latino / total_pop),
+    percent_trans_vehicle = (workTransVehicle / total_pop),
+    percentTransPublic = (workTransPublicTrans / total_pop),
     percentTransBike = (workTrans_bike / total_pop),
     percentTransWalk = (workTrans_walk / total_pop),
     percentTransOther = (workTrans_other / total_pop),
     percentTransHome = (workTrans_workHome / total_pop),
-    percentSnap = (total_SNAP / total_pop),
+    percentSnap = (total_SNAP / total_HH),
     percentComp = (has_comp / total_pop),
     percentDialUp = (has_comp_dialUp / total_pop),
-    percentBroadband = (has_comp_broadband /total_pop),
-    percentNoInternet = (has_comp_noInternet /total_pop),
+    percentBroadband = (has_comp_broadband / total_pop),
+    percentNoInternet = (no_internet / total_pop),
     percentNoComp = (no_comp / total_pop)
   )
  
+
+# Making this df to test/compare number of SNAP HH/total HH
+
+df_allVar_test <-
+  df_allVar %>%
+  select(total_HH, total_SNAP, month) %>%
+  filter(month == 8)
+
+sum(df_allVar_test$total_SNAP)
+sum(df_allVar_test$total_HH)
 
 ```
 
@@ -260,17 +279,18 @@ ruc_codes
 ```
 
 
-# Join RUC Code Data --NEED TO FIX
+# Join RUC Code Data
 ```{r}
-ruc_codes_new <- 
-ruc_codes %>%
-  rename(
-    fips = FIPS
-  )
+#ruc_codes_new <-
+#ruc_codes %>%
+# rename(
+# fips = FIPS)
+  
+colnames(ruc_codes) <- c("fips","State","County_Name", "Population_2010", "RUCC_2013", "Description")
 
 df_allVar2 <-
   df_allVar %>%
-    left_join(ruc_codes_new, by = "fips")
+    left_join(ruc_codes, by = "fips")
 
 ```
 
@@ -279,12 +299,12 @@ df_allVar2 <-
 ## Used this site as reference: https://rdrr.io/cran/tigris/man/counties.html
 
 ```{r}
-ca <- counties("California", cb = TRUE)
-
-gg <- ggplot()
-gg <- gg + geom_sf(data = ca, color="black", fill="white", size=0.25)
-
-gg
+# ca <- counties("California", cb = TRUE)
+# 
+# gg <- ggplot()
+# gg <- gg + geom_sf(data = ca, color="black", fill = "white", size=0.25)
+# 
+# gg
 ```
 
 
@@ -294,7 +314,7 @@ gg
 
 df %>% 
   st_as_sf() %>%  
-  filter(month == 7) %>% 
+  filter(month == 6) %>% 
   ggplot() +
   geom_sf(aes(fill = total), color = "grey25", size = 0.1) +
 
@@ -320,7 +340,7 @@ df %>%
     plot.subtitle = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "Total COVID CA Cases Per Month, July 2020",
+    title = "Total COVID CA Cases Per Month, June 2020",
     caption = "Source: New York Times Coronavirus Cases US"
   )
 
@@ -330,13 +350,13 @@ df %>%
 
 ```
 
-## Create Heat Map of CA with Cases Count per Population for July 2020
+## Create Heat Map of CA with Cases Count per Population for June 2020
 
 ```{r}
 
  df_allVar %>%
   st_as_sf() %>%  
-  filter(month == 7) %>% 
+  filter(month == 6) %>% 
   ggplot() +
   geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
 
@@ -362,7 +382,7 @@ df %>%
     plot.subtitle = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "CA COVID Cases, Percent of Population, July 2020",
+    title = "CA COVID Cases, Percent of Population, June 2020",
     caption = "Source: New York Times Coronavirus Cases US"
   )
 
@@ -481,7 +501,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Transportion to Work, Vehicle",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 # Map for Public Transport as Main Transportation Form
@@ -489,7 +509,7 @@ df_allVar %>%
   st_as_sf() %>%  
   filter(month == 7) %>% 
   ggplot() +
-  geom_sf(aes(fill = workTrans_publicTrans), color = "grey25", size = 0.1) +
+  geom_sf(aes(fill = workTransPublicTrans), color = "grey25", size = 0.1) +
 
   scale_fill_gradient2(
     breaks = seq(0.0, 1.0, .1),
@@ -514,7 +534,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Transportion to Work, Public Transit",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 ```
@@ -553,7 +573,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population on SNAP",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 ```
 
@@ -591,7 +611,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population With Computer Access",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 # Map for Dial Up
@@ -625,7 +645,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population With Dial Up",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 
@@ -659,7 +679,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population With Broadband",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 ```
@@ -673,7 +693,7 @@ df_allVar %>%
 
 df_allVar %>%
   st_as_sf() %>%  
-  filter(month == 7) %>% 
+  #filter(month == 7) %>% 
   ggplot() +
   geom_sf(aes(fill = percentNoInternet), color = "grey25", size = 0.1) +
 
@@ -700,14 +720,14 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population Without Internet",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 # Map for No Computer
 
 df_allVar %>%
   st_as_sf() %>%  
-  filter(month == 7) %>% 
+  #filter(month == 7) %>% 
   ggplot() +
   geom_sf(aes(fill = percentNoComp), color = "grey25", size = 0.1) +
 
@@ -734,7 +754,7 @@ df_allVar %>%
   ) +
   labs(
     title = "Percent of Population Without Computer",
-    caption = "Source: ACS 2018 Census Data"
+    caption = "Source: ACS 2019 Census Data"
   )
 
 
@@ -742,31 +762,280 @@ df_allVar %>%
 
 ```
 
-## Layer in Sam's Mapping of Coverage by Amazon & Walmart
+
+# Create Data Tables for Initial Exploratory Comparison
+
+```{r}
+# ca_counties <-
+#   ca_counties %>%
+#   rename(County = "NAME")
+# 
+# amz_wmt_reach %>%
+#   rename(County = "NAME")
+
+exploratory <-
+  amz_wmt_reach %>%
+    left_join(ca_counties %>% select(NAME, fips), by = "NAME")
+
+# exploratory <-
+#   exploratory[,-8] %>%
+#  # rename(fips = "county")
+#   #mutate('fips' = as.numeric(exploratory$county) + 6000)
+  
+
+# Join with RUC codes
+
+exploratory <-
+  exploratory %>%
+  left_join(ruc_codes %>% select(fips, RUCC_2013), by = "fips")
+
+exploratory <-
+  exploratory %>%
+  left_join(df_allVar2 %>% select(fips, cases_perPop, month, total_pop, total_SNAP, total_HH), by = "fips")
+
+#plot(x=exploratory$RUCC_2013, y=exploratory$`SNAP Concentration`, type="p")
+
+# Graph w/ Labels
+ggplot(exploratory) +
+  geom_point(aes(x = RUCC_2013, y = `% Reached`)) +
+  ggtitle("SNAP Coverage and Rurality") +
+  #geom_text(aes(x=RUCC_2013,y=`% Reached`, label=County, vjust = 0, hjust = 0))
+  geom_text(aes(x = RUCC_2013, y =`% Reached`, label = NAME))
+
+# Graph w/o Labels
+ggplot(exploratory, aes(x=RUCC_2013, y =`% Reached`))+
+  geom_point(shape = 1)
+
+```
+
+```{r}
+# Calculate Statistics on Lack of Rural Coverage
+
+# SNAP Specific 
+calculations <- 
+  filter(exploratory, `% Reached` == 0.0 & month == 7) %>%
+  select(fips, total_HH, total_SNAP)
+
+not_covered_SNAP <- sum(calculations$total_SNAP)
+view(not_covered_SNAP)
+
+# To get the denominator for % not covered
+calculations2 <-
+  filter(exploratory, month == 7) %>%
+  select(fips, total_HH, total_SNAP)
+
+sum(calculations2$total_SNAP)
+
+not_covered_SNAP/sum(calculations2$total_SNAP)
+
+# General Population, not just SNAP
+not_covered_general <- sum(calculations$total_HH)
+view(not_covered_general)
+
+sum(calculations2$total_HH)
+
+not_covered_general/sum(calculations2$total_HH)
+
+```
+
+# Overall SNAP Coverage in State and %'s Reached
+
+```{r}
+sum(amz_wmt_reach$`Total Reached`)
+
+sum(amz_wmt_reach$`Total Reached`)/sum(calculations2$total_SNAP)
+
+sum(amz_wmt_reach$`Reached by Walmart`)
+
+sum(amz_wmt_reach$`Reached by Walmart`)/sum(calculations2$total_SNAP)
+
+sum(amz_wmt_reach$`Reached by Amazon`)
+sum(amz_wmt_reach$`Reached by Amazon`)/sum(calculations2$total_SNAP)
+
+```
+
+
+
 
 ```{r}
 
-# df_1 <- amz_wmt_zip$amz_zip
-# df_1 %>% 
-#   leaflet() %>%
-#   addProviderTiles(providers$CartoDB.Positron) %>%
-#   addPolygons() %>%
-#   addPolygons(
-#     data= df_allVar2 %>% st_as_sf,
-#     fillColor = ~total
-#   )
+# Graph of % SNAP users reached vs. % county on SNAP
 
-  
+ggplot(amz_wmt_reach, aes(x =`SNAP Concentration`, y = `% Reached`)) +
+  geom_point(shape = 1)
 
- df_allVar %>%
+# Graph of % SNAP users reached vs. COVID Cases FOR SPECIFIC MONTH
+
+exploratory %>%
+  filter(month == "9") %>%
+  ggplot(aes(x = cases_perPop, y = `% Reached`)) +
+  geom_point(shape = 1)
+
+```
+
+
+
+## Layer in Sam's Mapping of Coverage by Amazon & Walmart
+
+# recreate Sam's work for creating inital shape files (https://github.com/unbox-initative/data/blob/master/eda/sam_shopping_dashboard.Rmd)
+
+```{r}
+
+ca_zip <-
+  ca_zip %>%
+  #st_transform(crs=4326)
+  st_as_sf(crs = 4326)
+
+CA_ALBERS <- 
+  "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+
+# amazon + walmart reach - all of CA
+az <- 
+  read.csv("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data-raw/amazonfresh_zipcodes.csv",colClasses=c("character","character")) %>% 
+  # filter(Zip %in% bay_zip$ZIP_CODE) %>%
+  # left_join(bay_zip, by=c("Zip"="ZIP_CODE")) %>%
+  left_join(ca_zip, by=c("Zip"="ZIP_CODE")) %>%
+  st_as_sf(crs=4326) %>% 
+  mutate(area = st_area(.)) %>% 
+  summarise(area=sum(area))
+# 
+# ggplot() +
+#   geom_sf(data = az)
+
+w <- 
+  read.csv("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data-raw/walmart_delivery_stores_ca.csv") %>% 
+  # filter(Zip.Code %in% bay_zip$ZIP_CODE) %>% 
+  st_as_sf(coords=c("Longitude", "Latitude"), crs=4326)
+
+# ggplot()+
+#   geom_sf(data = w) 
+
+wz <- 
+  w %>% 
+  st_transform(crs = CA_ALBERS) %>% 
+  st_buffer(dist = 9 * 1609.344) %>% 
+  st_transform(crs=4326) %>% 
+  #st_intersection(bay_zip) %>%
+  st_intersection(ca_zip) %>%
+  mutate(area = st_area(.)) %>% 
+  summarise(area=sum(area))
+
+# ggplot() +
+#   geom_sf(data = wz)
+
+```
+
+
+## Map Overlay of Amazon & Walmart with Heat Map w COVID Cases
+
+```{r}
+
+df_allVar %>%
   st_as_sf() %>%  
-  filter(month == 7) %>% 
+  filter(month == 6) %>% 
   ggplot() +
   geom_sf(aes(fill = cases_perPop), color = "grey25", size = 0.1) +
-  geom_sf(aes(fill = amz_wmt_zip$amz_zip), color = "grey25", size = 0.1) +
-  geom_sf(aes(fill = amz_wmt_zip$wmt), color = "grey25", size = 0.1) +
-  geom_sf(aes(fill = amz_wmt_zip$wmt_zip), color = "grey25", size = 0.1) +
+  geom_sf(data = wz, color = "orange") +
+  geom_sf(data = w, color = "yellow") +
+  geom_sf(data = az, color = "blue") +
+
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.4,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, .96),
+    plot.title = element_text(hjust = .5, vjust = 2.5),
+    plot.subtitle = element_text(hjust = 2, vjust = 1.5)
+  ) +
+  labs(
+    title = "SNAP OPP Coverage & COVID Cases (% of Population), June 2020",
+    caption = "Data source: New York Times Coronavirus Cases US"
+  )
+
+```
+
+
+# Calculation for Top 5 Counties Hardest Hit by COVID and Coverage for SNAP OPP Users
+
+```{r}
+
+df_allVar_hardest <-
+  df_allVar %>%
+  filter(month == 6)
+
+exploratory_june_total <-
+  exploratory %>%
+  select(`Total Reached`, `% Reached`, NAME, month, total_pop, total_SNAP, fips) %>%
+  filter(month == 6) %>%
+  filter(fips == 6037 | fips == 6065 | fips == 6073 | fips == 6059 | fips == 6071) 
+
+  sum(exploratory_june_total$`Total Reached`)
+
+
+sum(exploratory_june_total$`Total Reached`)/sum(exploratory_june_total$total_SNAP)
+
+exploratory_june_perPerson <-
+  exploratory %>%
+  select(`Total Reached`, `% Reached`, NAME, month, total_pop, total_SNAP, fips) %>%
+  filter(month == 6) %>%
+  filter(fips == 6025 | fips == 6031 | fips == 6037 | fips == 6107 | fips == 6065) 
+
+  sum(exploratory_june_perPerson$`Total Reached`)
+
+sum(exploratory_june_perPerson$`Total Reached`)/sum(exploratory_june_perPerson$total_SNAP)
+
+exploratory_july_perPerson <-
+  exploratory %>%
+  select(`Total Reached`, `% Reached`, NAME, month, total_pop, total_SNAP, fips) %>%
+  filter(month == 7) %>%
+  filter(fips == 6025 | fips == 6031 | fips == 6037 | fips == 6041 | fips == 6107) 
+
+  sum(exploratory_july_perPerson$`Total Reached`)
+
+sum(exploratory_july_perPerson$`Total Reached`)/sum(exploratory_july_perPerson$total_SNAP)
+
+
+exploratory_august_perPerson <-
+  exploratory %>%
+  select(`Total Reached`, `% Reached`, NAME, month, total_pop, total_SNAP, fips) %>%
+  filter(month == 8) %>%
+  filter(fips == 6025 | fips == 6031 | fips == 6029 | fips == 6107 | fips == 6047) 
+
+  sum(exploratory_august_perPerson$`Total Reached`)
+
+sum(exploratory_august_perPerson$`Total Reached`)/sum(exploratory_august_perPerson$total_SNAP)
   
+
+```
+
+
+
+
+# Overlay Coverage and SNAP % per county
+
+```{r}
+
+# Map for SNAP Usage & Coverage Overlay
+df_allVar %>%
+  st_as_sf() %>%  
+  ggplot() +
+  geom_sf(aes(fill = percentSnap), color = "grey25", size = 0.1) +
+  geom_sf(data = wz, color = "orange") +
+  geom_sf(data = w, color = "yellow") +
+  geom_sf(data = az, color = "blue") +
   
   scale_fill_gradient2(
     breaks = seq(0.0, 1.0, .1),
@@ -790,9 +1059,354 @@ df_allVar %>%
     plot.subtitle = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "XX July 2020",
-    caption = "Source: XXX"
+    title = "Percent of Population on SNAP & SNAP OPP Coverage",
+    caption = "Source: ACS 2019 Census Data"
   )
+
+
+```
+
+# SNAP OPP Overlap with Internet and Computer Access
+
+```{r}
+
+
+# Map for No Internet
+
+df_allVar %>%
+  st_as_sf() %>%  
+  ggplot() +
+  geom_sf(aes(fill = percentNoInternet), color = "grey25", size = 0.1) +
+  geom_sf(data = wz, color = "orange") +
+  geom_sf(data = w, color = "yellow") +
+  geom_sf(data = az, color = "blue") +
+  
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population Without Internet & SNAP OPP Coverage",
+    caption = "Source: ACS 2019 Census Data"
+  )
+
+# Map for No Computer
+
+df_allVar %>%
+  st_as_sf() %>%  
+  ggplot() +
+  geom_sf(aes(fill = percentNoComp), color = "grey25", size = 0.1) +
+  geom_sf(data = wz, color = "orange") +
+  geom_sf(data = w, color = "yellow") +
+  geom_sf(data = az, color = "blue") +
+  
+  scale_fill_gradient2(
+    breaks = seq(0.0, 1.0, .1),
+    low = COLOR_LOW,
+    high = COLOR_HIGH,
+    na.value = "grey"
+  ) +
+  guides(
+    fill =
+      guide_colorbar(
+        barheight = 0.5,
+        barwidth = 15,
+        title = NULL
+      )
+  ) +
+  theme_void() +
+  theme(
+    legend.direction = "horizontal",
+    legend.position = c(0.5, 0.95),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Percent of Population Without Computer & SNAP OPP Coverage",
+    caption = "Source: ACS 2019 Census Data"
+  )
+
+
+```
+
+# Data Analysis for Computer & Internet Access
+
+```{r}
+
+digital_analysis <-
+  amz_wmt_reach %>%
+    left_join(ca_counties %>% select(NAME, fips), by = "NAME")
+
+digital_analysis <-
+  digital_analysis %>%
+  left_join(df_allVar2 %>% select(fips, cases_perPop, month, total_pop, total_SNAP, percentBroadband, percentNoInternet, percentNoComp, percentDialUp), by = "fips") %>%
+  # for broadband:
+  # filter(fips == 6041 | fips == 6075 | fips == 6027 | fips == 6063 | fips == 6093) %>%
+  # for No Internet:
+  # filter(fips == 6105 | fips == 6049 | fips == 6091 | fips == 6043 | fips == 6021) %>%
+  # for No Computer Access
+  #filter(fips == 6049 | fips == 6105 | fips == 6091 | fips == 6043 | fips == 6093) %>%
+  # for Has Dial Up
+  filter(fips == 6003 | fips == 6043 | fips == 6009 | fips == 6105 | fips == 6093) %>%
+  filter(month == 7)
+
+sum(digital_analysis$`Total Reached`)
+
+sum(digital_analysis$`Total Reached`)/sum(digital_analysis$total_SNAP)
+
+sum(digital_analysis$total_SNAP)
+
+```
+
+# Data Analysis for Race/Ethnicity
+
+```{r}
+
+demo_analysis <-
+  amz_wmt_reach %>%
+  left_join(ca_counties %>% select(NAME, fips), by = "NAME")
+
+demo_analysis <-
+  demo_analysis %>%
+  left_join(df_allVar2 %>% select(fips, cases_perPop, month, total_pop, total_SNAP, percentWhite, percentBlack, percentNative, percentAsian, percentHaw_PacI, percentOther, percentTwoMore, percent_Latino), by = "fips") %>%
+  filter(month == 7) %>%
+  # For White
+  # filter(NAME == "Sierra" | NAME == "Nevada" | NAME == "Calaveras" | NAME == "Plumas" | NAME == "Modoc")
+  # For Black
+  # filter(NAME == "Solano" | NAME == "Alameda" | NAME == "Sacramento" | NAME == "Contra Costa" | NAME == "Lassen")
+  # For Native
+  # filter(NAME == "Alpine" | NAME == "Inyo" | NAME == "Del Norte" | NAME == "Trinity" | NAME == "Humboldt")
+  # for For Asian
+  # filter(NAME == "Santa Clara" | NAME == "San Francisco" | NAME == "Alameda" | NAME == "San Mateo" | NAME == "Orange")
+  # For HI/Pac Islander 
+   # filter(NAME == "San Mateo" | NAME == "Sacramento" | NAME == "Solano" | NAME == "Alameda" | NAME == "Lassen")
+  # For Latino
+   filter(NAME == "Imperial" | NAME == "Tulare" | NAME == "San Benito" | NAME == "Merced" | NAME == "Colusa")
+
+sum(demo_analysis$`Total Reached`)
+sum(demo_analysis$total_SNAP)
+
+sum(demo_analysis$`Total Reached`)/sum(demo_analysis$total_SNAP)
+
+
+```
+
+# Data Analysis for Transportation Method
+
+```{r}
+
+transp_analysis <-
+  amz_wmt_reach %>%
+  left_join(ca_counties %>% select(NAME, fips), by = "NAME")
+
+transp_analysis <-
+  transp_analysis %>%
+  left_join(df_allVar2 %>% select(fips, cases_perPop, month, total_pop, total_SNAP, percent_trans_vehicle, percentTransPublic, percentTransBike, percentTransWalk, percentTransOther, percentTransHome), by = "fips") %>%
+  filter(month == 7) %>%
+  # Vehicle
+  # filter(NAME == "San Benito" | NAME == "Orange"| NAME == "Ventura"| NAME == "Sonoma"| NAME == "Santa Clara")
+  # Public Transport
+  filter(NAME == "San Francisco" | NAME == "Mono"| NAME == "Alameda"| NAME == "San Mateo"| NAME == "Contra Costa")
+
+
+sum(transp_analysis$`Total Reached`)
+sum(transp_analysis$total_SNAP)
+sum(transp_analysis$`Total Reached`)/sum(transp_analysis$total_SNAP)
+
+```
+
+
+
+# Integrating in Sam's Food Desert Analysis (copied from Sam's code:
+# https://github.com/unbox-initative/dashboard/blob/master/eda/sam_shopping_dashboard.Rmd)
+
+
+```{r}
+
+ca_desert_shape <- readRDS("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/ca_desert_shape.rds")
+
+desert_reach <- 
+  amz_wmt_zip$amz_zip %>% 
+  st_union(amz_wmt_zip$wmt_zip) %>% 
+  st_intersection(st_make_valid(ca_desert_shape)) %>% 
+  mutate(
+    leftover_area = st_area(.),
+    area_proportion = leftover_area / og_area, # proportion of people served in food-desert-classified areas
+    snap_reached = area_proportion * SNAP
+  ) %>% 
+  st_collection_extract(type = c("POLYGON"), warn = FALSE)
+desert_noreach <- 
+  ca_desert_shape %>% 
+  st_make_valid() %>% 
+  st_difference(amz_wmt_zip$amz_zip %>% st_union(amz_wmt_zip$wmt_zip)) %>% 
+  st_collection_extract(type = c("POLYGON"), warn = FALSE)
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    data = desert_reach,
+    color = "#56bedf",
+    fillOpacity = 0.5,
+    weight = 1,
+    label = ~snap_reached
+  ) %>%
+  addPolygons(
+    data = desert_noreach,
+    color = "#e851a2",
+    fillOpacity = 0.5,
+    weight = 1,
+    label = ~SNAP
+  )
+
+```
+
+
+```{r}
+
+# snap_cbg_tract <- 
+#   map_dfr(
+#     ca_counties$COUNTYFP, 
+#     function(x) {
+#       getCensus(name = "acs/acs5",
+#                 vintage = 2019,
+#                 vars = c("B19058_002E"), 
+#                 region = "block group:*", 
+#                 regionin = paste0("state:06+county:", x)) %>% 
+#         mutate(
+#           GEOID = paste0(state, county, tract, block_group),
+#           tract = paste0(state, county, tract)
+#         ) %>% 
+#         select_if(
+#           !names(.) %in% c("state", "county", "block_group")
+#         ) %>% 
+#         rename("SNAP" = "B19058_002E")
+#     }) %>% 
+#   left_join(ca_cbgs %>% select(GEOID))
+# 
+# 
+# snap_cbg_tract %>% 
+#   filter(tract %in% ca_food_desert$CensusTract) %>%
+#   st_as_sf() %>%
+#   st_transform(crs = 4326) %>% 
+#   mutate(og_area = st_area(.)) %>% 
+#   saveRDS("rds/ca_desert_shape.rds")
+
+
+# total snap reached in food deserts
+round(sum(desert_reach$snap_reached))
+sum(desert_reach$snap_reached) / sum(ca_desert_shape$SNAP)
+# total snap not reached in food deserts
+round(sum(ca_desert_shape$SNAP) - as.numeric(sum(desert_reach$snap_reached)))
+(sum(ca_desert_shape$SNAP) - as.numeric(sum(desert_reach$snap_reached))) / sum(ca_desert_shape$SNAP)
+
+
+#saveRDS(desert_reach, "rds/desert_reach.rds")
+#saveRDS(desert_noreach, "rds/desert_noreach.rds")
+
+```
+
+
+
+
+
+## another work around method to try to re-create Sam's shapefiles
+
+```{r}
+
+longlat <- "+proj=longlat +datum=WGS84 +no_defs"
+
+
+ca_walmart <-
+  amz_wmt_zip$wmt_zip %>%
+  st_as_sf(crs = longlat) 
+  #st_transform(crs = st_crs(4326))
+  #read_sf(dsn = "covid-19-data/data/amz_wmt_zip.rds") %>%
+  #st_cast("MULTIPOLYGON")
+  #amz_wmt_zip$wmt_zip %>%
+  #st_transform(crs = longlat)
+  ca_walmart %>%
+    #st_transform(crs =4326) %>%
+   #st_cast("MULTIPOLYGON") %>%
+    #st_transform(crs = longlat) %>%
+    ggplot() +
+    geom_sf()
+ # mapview(ca_walmart)
+  
+# 
+# list_files <- readRDS("/Users/isabellefoster/GitHub/isaFos/Amazon_Walmart/covid-19-data/data/amz_wmt_zip.rds")
+# amz_zip <- list_files$amz_zip
+# wmt_zip <- list_files$wmt_zip
+# wmt <- list_files$wmt
+amz_zip %>%
+  ggplot() +
+  geom_sf()
+test <- unlist(amz_zip$geometry)
+
+# Code from Nico:
+# separated_coord <- amz_zip %>%
+#     mutate(lat = unlist(amz_zip$geometry,1),
+#            long = unlist(amz_zip$geometry,2))
+  
+ca_walmart <-
+  ca_walmart %>%
+  st_cast("MULTIPOLYGON") %>%
+  st_transform(crs = longlat)
+  
+  
+ca_amazon <-
+  amz_wmt_zip$amz_zip %>%
+  st_transform(crs = 4326)
+
+ca_walmart_zip <-
+  amz_wmt_zip$wmt_zip
+
+
+# df_1 <- amz_wmt_zip$amz_zip
+# df_1 %>% 
+#   leaflet() %>%
+#   addProviderTiles(providers$CartoDB.Positron) %>%
+#   addPolygons() %>%
+#   addPolygons(
+#     data= df_allVar2 %>% st_as_sf,
+#     fillColor = ~total
+#   )
+
+  
+
+```
+
+# Try Leaflet Option with Sam (copied code from https://github.com/unbox-initative/data/blob/master/baymap/global.R)
+
+```{r}
+
+longlat <- "+proj=longlat +datum=WGS84 +no_defs"
+
+map_amz_wmt <- 
+  leaflet() %>% 
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    addPolygons(
+      data = ca_walmart ,
+      color = "#e851a2",
+      fillOpacity = 0.5,
+      weight=1,
+      group="Amazon"
+    )
 
 
 
@@ -802,6 +1416,91 @@ df_allVar %>%
 
 
 
+# Create Scatterplot per Bill's Suggestion- % Reached and COVID Cases
+
+```{r}
+
+#Create DF with Amazon and Walmart Reach and COVID Cases
+ca_data <- 
+  ca_data %>%
+  rename(County = "county")
+
+store_reach_covid <-
+  amz_wmt_reach %>%
+  left_join(
+    ca_data %>%
+      # rename(County = 'county') %>% 
+      mutate(month = lubridate::floor_date(date, unit = "month")) %>%
+      group_by(County, month) %>%
+      #filter(month == 7) %>% 
+      summarise((total = sum(cases))), 
+    by = "County"
+  )
+    
+# Multi-dimensional Plot
+ggplot(store_reach_covid) +
+  geom_point(aes(month, `SNAP Concentration`, size = `(total = sum(cases))`, color =
+                   County)) +
+  theme_light()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  scale_x_date(date_labels = "%d-%b", date_breaks = "1 month")+
+  ggtitle("testing")+
+  xlab("Month")
+  
+
+
+
+
+# df <-
+#   df %>%
+#   left_join(ca_counties, by = "fips")
+# 
+# 
+#   df <- 
+#   ca_data %>% 
+#   select(date, fips, cases, deaths) %>%
+#   mutate(cases = as.integer(cases)) %>%
+#   mutate(
+#     date = as.Date(date), 
+#     month = month(date)
+#   ) %>%
+#   group_by(fips, month) %>%
+#   summarise(total = sum(cases))
+#   
+#   
+#   ca_cases <-
+# #   ca_counties %>%
+# #   left_join(
+# #     ca_data %>%
+# #       mutate(month = lubridate::floor_date(date, unit = "month")) %>%
+# #       group_by(fips, month) %>% 
+# #       summarize(total = sum(cases)) %>%
+# #       ungroup() %>%
+# #       left_join(ca_pop, by = "fips") %>%
+# #       mutate(cases_per_capita = total / pop),
+# #     by = "fips"
+# #   )
+
+
+```
+
+
+
+# Create plot comparing % OPP Reach v % Population on SNAP
+```{r}
+
+
+ggplot(amz_wmt_reach) +
+  geom_point(aes(`SNAP Concentration`, `% Reached`)) +
+  
+  theme_light()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  ggtitle("Reach of SNAP OPP vs. % Population on SNAP")+
+  xlab("Percent County Population on SNAP")
+
+
+
+```
 
 
 
